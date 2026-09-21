@@ -1,4 +1,8 @@
-import { Client as NotionClient, type PageObjectResponse, type QueryDataSourceResponse } from "@notionhq/client";
+import {
+	Client as NotionClient,
+	type PageObjectResponse,
+	type QueryDataSourceResponse,
+} from "@notionhq/client";
 import {
 	createClient,
 	createConfig,
@@ -25,6 +29,7 @@ type OptionalEnv = Env & {
 export type NotionInventoryPage = {
 	id: string;
 	lastEditedTime: string;
+	title: string;
 };
 
 export type SyncDiff = {
@@ -121,6 +126,33 @@ function isFullNotionPage(
 	);
 }
 
+function plainTextOfRichText(items: readonly { plain_text: string }[]): string {
+	return items.map((item) => item.plain_text).join("").trim();
+}
+
+function notionDocumentId(pageId: string): string {
+	return `notion_page:${pageId}`;
+}
+
+function notionPageTitle(page: PageObjectResponse): string {
+	const titleProperty = Object.values(page.properties).find(
+		(property) => property.type === "title"
+	);
+	if (titleProperty?.type !== "title") return page.id;
+	return plainTextOfRichText(titleProperty.title) || page.id;
+}
+
+async function retrieveDataSourceName(
+	notion: NotionClient,
+	dataSourceId: string
+): Promise<string> {
+	const response = await notion.dataSources.retrieve({
+		data_source_id: dataSourceId,
+	});
+	if (!("title" in response)) return dataSourceId;
+	return plainTextOfRichText(response.title) || dataSourceId;
+}
+
 async function listNotionPages(
 	notion: NotionClient,
 	dataSourceId: string
@@ -147,7 +179,11 @@ async function listNotionPages(
 			if (!isFullNotionPage(result)) {
 				throw new Error(`Notion returned page ${result.id} without last_edited_time`);
 			}
-			pages.push({ id: result.id, lastEditedTime: result.last_edited_time });
+			pages.push({
+				id: result.id,
+				lastEditedTime: result.last_edited_time,
+				title: notionPageTitle(result),
+			});
 		}
 
 		if (!response.has_more) return pages;
@@ -192,13 +228,13 @@ export function diffInventories(
 	notionPages: readonly NotionInventoryPage[],
 	hindsightDocuments: readonly HindsightInventoryDocument[]
 ): SyncDiff {
-	const notionById = new Map(notionPages.map((page) => [page.id, page]));
+	const notionById = new Map(notionPages.map((page) => [notionDocumentId(page.id), page]));
 	const hindsightById = new Map(hindsightDocuments.map((document) => [document.id, document]));
 	const create: NotionInventoryPage[] = [];
 	const update: NotionInventoryPage[] = [];
 
 	for (const page of notionById.values()) {
-		const document = hindsightById.get(page.id);
+		const document = hindsightById.get(notionDocumentId(page.id));
 		if (!document) {
 			create.push(page);
 		} else if (revisionOf(document) !== page.lastEditedTime) {
@@ -234,6 +270,7 @@ async function retainDocuments(
 	hindsight: HindsightClient,
 	bankId: string,
 	documentTags: string[],
+	dataSourceName: string,
 	documents: readonly RetainDocument[]
 ): Promise<string[]> {
 	const batches: MemoryItemInput[][] = [];
@@ -241,7 +278,8 @@ async function retainDocuments(
 		batches.push(
 			documents.slice(index, index + RETAIN_BATCH_SIZE).map((document) => ({
 				content: document.content,
-				document_id: document.id,
+				context: `Notion Page "${document.title}" in Data Source "${dataSourceName}"`,
+				document_id: notionDocumentId(document.id),
 				tags: documentTags,
 				metadata: { [RETAIN_METADATA_REVISION]: document.lastEditedTime },
 				update_mode: "replace",
@@ -317,9 +355,11 @@ export async function syncNotionDataSource(env: Env): Promise<SyncSummary> {
 		config.documentTags
 	);
 	const notionInventory = listNotionPages(notion, config.notionDataSourceId);
-	const [hindsightDocuments, notionPages] = await Promise.all([
+	const dataSourceName = retrieveDataSourceName(notion, config.notionDataSourceId);
+	const [hindsightDocuments, notionPages, sourceName] = await Promise.all([
 		hindsightInventory,
 		notionInventory,
+		dataSourceName,
 	]);
 
 	const diff = diffInventories(notionPages, hindsightDocuments);
@@ -331,6 +371,7 @@ export async function syncNotionDataSource(env: Env): Promise<SyncSummary> {
 			hindsight,
 			config.hindsightBankId,
 			config.documentTags,
+			sourceName,
 			changedDocuments
 		),
 		deleteDocuments(hindsight, config.hindsightBankId, diff.delete),
