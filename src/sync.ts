@@ -222,7 +222,7 @@ async function retrieveMarkdown(
 	notion: NotionClient,
 	page: NotionInventoryPage
 ): Promise<RetainDocument> {
-	const response = await notion.pages.retrieveMarkdown({ page_id: page.id });
+	const response = await notion.pages.retrieveMarkdown({ page_id: page.id, include_transcript: true });
 	if (response.truncated || response.unknown_block_ids.length > 0) {
 		throw new Error(`Notion page ${page.id} returned truncated markdown`);
 	}
