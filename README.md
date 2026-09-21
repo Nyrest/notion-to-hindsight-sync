@@ -1,3 +1,5 @@
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Nyrest/notion-to-hindsight-sync)
+
 # Notion → Hindsight sync
 
 One Cloudflare Worker instance synchronizes one Notion data source to one Hindsight bank. It keeps the last Notion `last_edited_time` in Hindsight metadata, so unchanged pages are skipped.
