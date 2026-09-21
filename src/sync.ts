@@ -120,7 +120,6 @@ async function listNotionPages(
 		const response = await notion.dataSources.query({
 			data_source_id: dataSourceId,
 			page_size: INVENTORY_PAGE_SIZE,
-			in_trash: false,
 			result_type: "page",
 			...(nextCursor ? { start_cursor: nextCursor } : {}),
 		});
