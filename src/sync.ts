@@ -44,7 +44,7 @@ type SyncConfig = {
 	notionDataSourceId: string;
 	hindsightBaseUrl: string;
 	hindsightBankId: string;
-	hindsightApiKey: string;
+	hindsightApiKey?: string;
 	notionToken: string;
 	documentTags: string[];
 };
@@ -59,7 +59,7 @@ function getSyncConfig(env: Env): SyncConfig {
 	const notionDataSourceId = required(env.NOTION_DATA_SOURCE_ID, "NOTION_DATA_SOURCE_ID");
 	const hindsightBaseUrl = required(env.HINDSIGHT_BASE_URL, "HINDSIGHT_BASE_URL").replace(/\/+$/, "");
 	const hindsightBankId = required(env.HINDSIGHT_BANK_ID, "HINDSIGHT_BANK_ID");
-	const hindsightApiKey = required(env.HINDSIGHT_API_KEY, "HINDSIGHT_API_KEY");
+	const hindsightApiKey = (env as Env & { HINDSIGHT_API_KEY?: string }).HINDSIGHT_API_KEY?.trim() || undefined;
 	const notionToken = required(env.NOTION_TOKEN, "NOTION_TOKEN");
 
 	const parsedBaseUrl = new URL(hindsightBaseUrl);
@@ -275,16 +275,19 @@ export async function syncNotionDataSource(env: Env): Promise<SyncSummary> {
 	});
 	const hindsight = new HindsightClient({
 		baseUrl: config.hindsightBaseUrl,
-		apiKey: config.hindsightApiKey,
+		...(config.hindsightApiKey ? { apiKey: config.hindsightApiKey } : {}),
 		userAgent: "notion-to-hindsight-sync/0.1.0",
 	});
+	const hindsightHeaders: Record<string, string> = {
+		"User-Agent": "notion-to-hindsight-sync/0.1.0",
+	};
+	if (config.hindsightApiKey) {
+		hindsightHeaders.Authorization = `Bearer ${config.hindsightApiKey}`;
+	}
 	const hindsightTransport = createClient(
 		createConfig({
 			baseUrl: config.hindsightBaseUrl,
-			headers: {
-				Authorization: `Bearer ${config.hindsightApiKey}`,
-				"User-Agent": "notion-to-hindsight-sync/0.1.0",
-			},
+			headers: hindsightHeaders,
 		})
 	);
 

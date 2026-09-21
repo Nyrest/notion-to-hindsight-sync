@@ -6,16 +6,17 @@ One Cloudflare Worker instance synchronizes one Notion data source to one Hindsi
 
 ## Configure
 
-For local development, copy `.dev.vars.example` to `.dev.vars`, fill in the two secrets, and add the three non-secret variables below. For deployment, set the non-secret variables in `wrangler.jsonc`:
+For local development, copy `.dev.vars.example` to `.dev.vars`, fill in `NOTION_TOKEN`, and add the three non-secret variables below. Hindsight API authentication is optional; omit `HINDSIGHT_API_KEY` when the Hindsight server allows unauthenticated access. For deployment, set the non-secret variables in `wrangler.jsonc`:
 
 - `NOTION_DATA_SOURCE_ID`
 - `HINDSIGHT_BASE_URL`
 - `HINDSIGHT_BANK_ID`
 
-Set the two secrets with Wrangler:
+Set the required secret with Wrangler:
 
 ```bash
 npx wrangler secret put NOTION_TOKEN
+# Only when the Hindsight server requires authentication:
 npx wrangler secret put HINDSIGHT_API_KEY
 ```
 

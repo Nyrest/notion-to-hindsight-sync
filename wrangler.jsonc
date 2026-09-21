@@ -23,6 +23,6 @@
 		"HINDSIGHT_BANK_ID": ""
 	},
 	"secrets": {
-		"required": ["NOTION_TOKEN", "HINDSIGHT_API_KEY"]
+		"required": ["NOTION_TOKEN"]
 	}
 }
