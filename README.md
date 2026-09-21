@@ -6,7 +6,7 @@ One Cloudflare Worker instance synchronizes one Notion data source to one Hindsi
 
 ## Configure
 
-For local development, copy `.dev.vars.example` to `.dev.vars` and fill in the values. For deployment, set these non-secret variables in `wrangler.jsonc`:
+For local development, copy `.dev.vars.example` to `.dev.vars`, fill in the two secrets, and add the three non-secret variables below. For deployment, set the non-secret variables in `wrangler.jsonc`:
 
 - `NOTION_DATA_SOURCE_ID`
 - `HINDSIGHT_BASE_URL`
