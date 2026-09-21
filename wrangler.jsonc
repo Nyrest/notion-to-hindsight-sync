@@ -17,12 +17,7 @@
 	"triggers": {
 		"crons": ["0 * * * *"]
 	},
-	"vars": {
-		"NOTION_DATA_SOURCE_ID": "",
-		"HINDSIGHT_BASE_URL": "",
-		"HINDSIGHT_BANK_ID": ""
-	},
 	"secrets": {
-		"required": ["NOTION_TOKEN"]
+		"required": ["NOTION_TOKEN", "NOTION_DATA_SOURCE_ID", "HINDSIGHT_BASE_URL", "HINDSIGHT_BANK_ID"]
 	}
 }
