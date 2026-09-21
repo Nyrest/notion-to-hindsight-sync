@@ -13,13 +13,21 @@ import {
 } from "@vectorize-io/hindsight-client";
 
 const NOTION_API_VERSION = "2026-03-11";
-const INVENTORY_PAGE_SIZE = 250;
-const RETAIN_BATCH_SIZE = 25;
+export const NOTION_PAGE_SIZE = 100;
+export const HINDSIGHT_INVENTORY_PAGE_SIZE = 250;
+export const RETAIN_BATCH_SIZE = 25;
+export const NOTION_REQUEST_INTERVAL_MS = 350;
+export const HINDSIGHT_OPERATION_POLL_MS = 30_000;
+export const HINDSIGHT_OPERATION_RETRY_LIMIT = 3;
+
 const RETAIN_METADATA_REVISION = "notion_last_edited_time";
 const SOURCE_TAG = "source:notion";
 
 type HindsightTransport = ReturnType<typeof createClient>;
-type HindsightInventoryDocument = ListDocumentsResponse["items"][number];
+type HindsightInventoryDocument = Pick<
+	ListDocumentsResponse["items"][number],
+	"id" | "document_metadata"
+>;
 type OptionalEnv = Env & {
 	HINDSIGHT_API_KEY?: string;
 	CF_ACCESS_CLIENT_ID?: string;
@@ -39,10 +47,16 @@ export type SyncDiff = {
 	unchanged: number;
 };
 
-export type SyncSummary = SyncDiff & {
+export type RetainSubmission = {
+	created: number;
+	updated: number;
+	unchanged: number;
 	retained: number;
-	deleted: number;
 	retainOperations: string[];
+};
+
+export type SyncSummary = RetainSubmission & {
+	deleted: number;
 	durationMs: number;
 };
 
@@ -59,6 +73,16 @@ type SyncConfig = {
 	cfAccessClientSecret?: string;
 	notionToken: string;
 	documentTags: string[];
+};
+
+export type HindsightOperationClient = {
+	getOperationStatus(operationId: string): Promise<HindsightOperationStatus>;
+	retryOperation(operationId: string): Promise<void>;
+};
+
+export type HindsightOperationStatus = {
+	status: "pending" | "processing" | "completed" | "failed" | "cancelled" | "not_found";
+	retry_count?: number | null;
 };
 
 function required(value: string | undefined, name: string): string {
@@ -116,6 +140,64 @@ function requireSdkData<T>(
 	return response.data;
 }
 
+function createNotionPacer(): () => Promise<void> {
+	let nextRequestAt = 0;
+	return async () => {
+		const now = Date.now();
+		const delay = Math.max(0, nextRequestAt - now);
+		nextRequestAt = Math.max(nextRequestAt, now) + NOTION_REQUEST_INTERVAL_MS;
+		if (delay > 0) await sleep(delay);
+	};
+}
+
+async function pacedNotionRequest<T>(
+	pace: () => Promise<void>,
+	request: () => Promise<T>
+): Promise<T> {
+	await pace();
+	return request();
+}
+
+function createClients(env: Env): {
+	config: SyncConfig;
+	notion: NotionClient;
+	hindsight: HindsightClient;
+	hindsightTransport: HindsightTransport;
+} {
+	const config = getSyncConfig(env);
+	const notion = new NotionClient({
+		auth: config.notionToken,
+		notionVersion: NOTION_API_VERSION,
+		retry: { maxRetries: 2 },
+	});
+	const hindsightHeaders: Record<string, string> = {
+		"User-Agent": "notion-to-hindsight-sync/0.1.0",
+	};
+	if (config.cfAccessClientId) {
+		hindsightHeaders["CF-Access-Client-Id"] = config.cfAccessClientId;
+	}
+	if (config.cfAccessClientSecret) {
+		hindsightHeaders["CF-Access-Client-Secret"] = config.cfAccessClientSecret;
+	}
+	if (config.hindsightApiKey) {
+		hindsightHeaders.Authorization = `Bearer ${config.hindsightApiKey}`;
+	}
+
+	return {
+		config,
+		notion,
+		hindsight: new HindsightClient({
+			baseUrl: config.hindsightBaseUrl,
+			headers: hindsightHeaders,
+			...(config.hindsightApiKey ? { apiKey: config.hindsightApiKey } : {}),
+			userAgent: "notion-to-hindsight-sync/0.1.0",
+		}),
+		hindsightTransport: createClient(
+			createConfig({ baseUrl: config.hindsightBaseUrl, headers: hindsightHeaders })
+		),
+	};
+}
+
 function isFullNotionPage(
 	result: QueryDataSourceResponse["results"][number]
 ): result is PageObjectResponse {
@@ -144,29 +226,33 @@ function notionPageTitle(page: PageObjectResponse): string {
 
 async function retrieveDataSourceName(
 	notion: NotionClient,
-	dataSourceId: string
+	dataSourceId: string,
+	pace: () => Promise<void>
 ): Promise<string> {
-	const response = await notion.dataSources.retrieve({
-		data_source_id: dataSourceId,
-	});
+	const response = await pacedNotionRequest(pace, () =>
+		notion.dataSources.retrieve({ data_source_id: dataSourceId })
+	);
 	if (!("title" in response)) return dataSourceId;
 	return plainTextOfRichText(response.title) || dataSourceId;
 }
 
-async function listNotionPages(
+export async function listNotionPages(
 	notion: NotionClient,
-	dataSourceId: string
+	dataSourceId: string,
+	pace: () => Promise<void> = createNotionPacer()
 ): Promise<NotionInventoryPage[]> {
 	const pages: NotionInventoryPage[] = [];
 	let nextCursor: string | null = null;
 
 	while (true) {
-		const response = await notion.dataSources.query({
-			data_source_id: dataSourceId,
-			page_size: INVENTORY_PAGE_SIZE,
-			result_type: "page",
-			...(nextCursor ? { start_cursor: nextCursor } : {}),
-		});
+		const response = await pacedNotionRequest(pace, () =>
+			notion.dataSources.query({
+				data_source_id: dataSourceId,
+				page_size: NOTION_PAGE_SIZE,
+				result_type: "page",
+				...(nextCursor ? { start_cursor: nextCursor } : {}),
+			})
+		);
 
 		if (response.request_status?.type === "incomplete") {
 			throw new Error(
@@ -207,12 +293,14 @@ async function listHindsightDocuments(
 			query: {
 				tags: documentTags,
 				tags_match: "all_strict",
-				limit: INVENTORY_PAGE_SIZE,
+				limit: HINDSIGHT_INVENTORY_PAGE_SIZE,
 				offset,
 			},
 		});
 		const data = requireSdkData(response, "Hindsight listDocuments");
-		documents.push(...data.items);
+		for (const document of data.items) {
+			documents.push({ id: document.id, document_metadata: document.document_metadata });
+		}
 		offset += data.items.length;
 
 		if (data.items.length === 0 || offset >= data.total) return documents;
@@ -256,9 +344,12 @@ export function diffInventories(
 
 async function retrieveMarkdown(
 	notion: NotionClient,
-	page: NotionInventoryPage
+	page: NotionInventoryPage,
+	pace: () => Promise<void>
 ): Promise<RetainDocument> {
-	const response = await notion.pages.retrieveMarkdown({ page_id: page.id, include_transcript: true });
+	const response = await pacedNotionRequest(pace, () =>
+		notion.pages.retrieveMarkdown({ page_id: page.id, include_transcript: true })
+	);
 	if (response.truncated || response.unknown_block_ids.length > 0) {
 		throw new Error(`Notion page ${page.id} returned truncated markdown`);
 	}
@@ -266,122 +357,198 @@ async function retrieveMarkdown(
 	return { ...page, content: response.markdown };
 }
 
-async function retainDocuments(
-	hindsight: HindsightClient,
-	bankId: string,
+function toRetainItems(
+	documents: readonly RetainDocument[],
 	documentTags: string[],
-	dataSourceName: string,
-	documents: readonly RetainDocument[]
-): Promise<string[]> {
-	const batches: MemoryItemInput[][] = [];
-	for (let index = 0; index < documents.length; index += RETAIN_BATCH_SIZE) {
-		batches.push(
-			documents.slice(index, index + RETAIN_BATCH_SIZE).map((document) => ({
-				content: document.content,
-				context: `Notion Page "${document.title}" in Data Source "${dataSourceName}"`,
-				document_id: notionDocumentId(document.id),
-				tags: documentTags,
-				metadata: { [RETAIN_METADATA_REVISION]: document.lastEditedTime },
-				update_mode: "replace",
-			}))
-		);
-	}
+	dataSourceName: string
+): MemoryItemInput[] {
+	return documents.map((document) => ({
+		content: document.content,
+		context: `Notion Page "${document.title}" in Data Source "${dataSourceName}"`,
+		document_id: notionDocumentId(document.id),
+		tags: documentTags,
+		metadata: { [RETAIN_METADATA_REVISION]: document.lastEditedTime },
+		update_mode: "replace",
+	}));
+}
 
-	const responses = await Promise.all(
-		batches.map((batch) =>
-			hindsight.retainBatch(bankId, batch, {
-				async: true,
-				operationId: crypto.randomUUID(),
-			})
+function chunk<T>(items: readonly T[], size: number): T[][] {
+	const batches: T[][] = [];
+	for (let index = 0; index < items.length; index += size) {
+		batches.push(items.slice(index, index + size));
+	}
+	return batches;
+}
+
+function bytesToUuid(bytes: Uint8Array): string {
+	bytes[6] = (bytes[6] & 0x0f) | 0x50;
+	bytes[8] = (bytes[8] & 0x3f) | 0x80;
+	const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export async function operationIdFor(
+	workflowInstanceId: string,
+	pages: readonly NotionInventoryPage[]
+): Promise<string> {
+	const fingerprint = pages
+		.map((page) => `${page.id}\u0000${page.lastEditedTime}`)
+		.sort()
+		.join("\u0001");
+	const digest = new Uint8Array(
+		await crypto.subtle.digest(
+			"SHA-256",
+			new TextEncoder().encode(`${workflowInstanceId}\u0002${fingerprint}`)
 		)
 	);
-
-	for (const response of responses) {
-		if (!response.success) throw new Error("Hindsight retainBatch was not accepted");
-	}
-
-	return responses.flatMap((response) =>
-		response.operation_id ? [response.operation_id] : []
-	);
+	return bytesToUuid(digest.slice(0, 16));
 }
 
-async function deleteDocuments(
-	hindsight: HindsightClient,
-	bankId: string,
-	documentIds: readonly string[]
-): Promise<number> {
-	await Promise.all(documentIds.map((documentId) => hindsight.deleteDocument(bankId, documentId)));
-	return documentIds.length;
+function operationIdsFrom(response: { operation_id?: string | null; operation_ids?: string[] | null }): string[] {
+	return [...new Set([response.operation_id, ...(response.operation_ids ?? [])].filter(Boolean))] as string[];
 }
 
-export async function syncNotionDataSource(env: Env): Promise<SyncSummary> {
-	const startedAt = Date.now();
-	const config = getSyncConfig(env);
-	const notion = new NotionClient({
-		auth: config.notionToken,
-		notionVersion: NOTION_API_VERSION,
-		retry: { maxRetries: 2 },
-	});
-	const hindsightHeaders: Record<string, string> = {
-		"User-Agent": "notion-to-hindsight-sync/0.1.0",
-	};
-	if (config.cfAccessClientId) {
-		hindsightHeaders["CF-Access-Client-Id"] = config.cfAccessClientId;
-	}
-	if (config.cfAccessClientSecret) {
-		hindsightHeaders["CF-Access-Client-Secret"] = config.cfAccessClientSecret;
-	}
-	if (config.hindsightApiKey) {
-		hindsightHeaders.Authorization = `Bearer ${config.hindsightApiKey}`;
-	}
-	const hindsight = new HindsightClient({
-		baseUrl: config.hindsightBaseUrl,
-		headers: hindsightHeaders,
-		...(config.hindsightApiKey ? { apiKey: config.hindsightApiKey } : {}),
-		userAgent: "notion-to-hindsight-sync/0.1.0",
-	});
-	const hindsightTransport = createClient(
-		createConfig({
-			baseUrl: config.hindsightBaseUrl,
-			headers: hindsightHeaders,
-		})
-	);
-
-	// Start Hindsight first, then start Notion immediately so the two inventories
-	// are fetched in parallel rather than forming a request waterfall.
-	const hindsightInventory = listHindsightDocuments(
+export async function submitRetainOperations(
+	env: Env,
+	workflowInstanceId: string
+): Promise<RetainSubmission> {
+	const { config, notion, hindsight, hindsightTransport } = createClients(env);
+	const pace = createNotionPacer();
+	const hindsightDocuments = await listHindsightDocuments(
 		hindsightTransport,
 		config.hindsightBankId,
 		config.documentTags
 	);
-	const notionInventory = listNotionPages(notion, config.notionDataSourceId);
-	const dataSourceName = retrieveDataSourceName(notion, config.notionDataSourceId);
-	const [hindsightDocuments, notionPages, sourceName] = await Promise.all([
-		hindsightInventory,
-		notionInventory,
-		dataSourceName,
-	]);
-
+	const notionPages = await listNotionPages(notion, config.notionDataSourceId, pace);
+	const dataSourceName = await retrieveDataSourceName(notion, config.notionDataSourceId, pace);
 	const diff = diffInventories(notionPages, hindsightDocuments);
-	const changedPages = [...diff.create, ...diff.update];
-	const changedDocuments = await Promise.all(changedPages.map((page) => retrieveMarkdown(notion, page)));
+	const changedPages = [...diff.create, ...diff.update].sort((left, right) =>
+		left.id.localeCompare(right.id)
+	);
+	const retainOperations: string[] = [];
 
-	const [retainOperations, deleted] = await Promise.all([
-		retainDocuments(
-			hindsight,
+	for (const batch of chunk(changedPages, RETAIN_BATCH_SIZE)) {
+		const documents: RetainDocument[] = [];
+		for (const page of batch) documents.push(await retrieveMarkdown(notion, page, pace));
+		const response = await hindsight.retainBatch(
 			config.hindsightBankId,
-			config.documentTags,
-			sourceName,
-			changedDocuments
-		),
-		deleteDocuments(hindsight, config.hindsightBankId, diff.delete),
-	]);
+			toRetainItems(documents, config.documentTags, dataSourceName),
+			{ async: true, operationId: await operationIdFor(workflowInstanceId, batch) }
+		);
+		if (!response.success) throw new Error("Hindsight retainBatch was not accepted");
+		retainOperations.push(...operationIdsFrom(response));
+	}
 
 	return {
-		...diff,
-		retained: changedDocuments.length,
-		deleted,
-		retainOperations,
-		durationMs: Date.now() - startedAt,
+		created: diff.create.length,
+		updated: diff.update.length,
+		unchanged: diff.unchanged,
+		retained: changedPages.length,
+		retainOperations: [...new Set(retainOperations)],
 	};
+}
+
+function createOperationClient(
+	transport: HindsightTransport,
+	bankId: string
+): HindsightOperationClient {
+	return {
+		async getOperationStatus(operationId) {
+			return requireSdkData(
+				await sdk.getOperationStatus({
+					client: transport,
+					path: { bank_id: bankId, operation_id: operationId },
+				}),
+				"Hindsight getOperationStatus"
+			);
+		},
+		async retryOperation(operationId) {
+			const response = requireSdkData(
+				await sdk.retryOperation({
+					client: transport,
+					path: { bank_id: bankId, operation_id: operationId },
+				}),
+				"Hindsight retryOperation"
+			);
+			if (!response.success) throw new Error("Hindsight retryOperation was not accepted");
+		},
+	};
+}
+
+export async function waitForRetainOperations(
+	client: HindsightOperationClient,
+	operationIds: readonly string[],
+	wait: (durationMs: number) => Promise<void> = sleep
+): Promise<void> {
+	if (operationIds.length === 0) return;
+
+	while (true) {
+		let allCompleted = true;
+		for (const operationId of operationIds) {
+			const operation = await client.getOperationStatus(operationId);
+			switch (operation.status) {
+				case "completed":
+					break;
+				case "pending":
+				case "processing":
+					allCompleted = false;
+					break;
+				case "failed":
+					if ((operation.retry_count ?? 0) >= HINDSIGHT_OPERATION_RETRY_LIMIT) {
+						throw new Error(
+							`Hindsight operation ${operationId} failed after ${HINDSIGHT_OPERATION_RETRY_LIMIT} retries`
+						);
+					}
+					await client.retryOperation(operationId);
+					allCompleted = false;
+					break;
+				case "cancelled":
+				case "not_found":
+					throw new Error(`Hindsight operation ${operationId} ended as ${operation.status}`);
+			}
+		}
+
+		if (allCompleted) return;
+		await wait(HINDSIGHT_OPERATION_POLL_MS);
+	}
+}
+
+export async function waitForSubmittedRetains(env: Env, operationIds: readonly string[]): Promise<void> {
+	const { config, hindsightTransport } = createClients(env);
+	await waitForRetainOperations(
+		createOperationClient(hindsightTransport, config.hindsightBankId),
+		operationIds
+	);
+}
+
+function isNotFoundError(error: unknown): boolean {
+	return error instanceof Error && (/\b404\b/.test(error.message) || /not[ _-]?found/i.test(error.message));
+}
+
+export async function deleteMissingDocuments(env: Env): Promise<number> {
+	const { config, notion, hindsight, hindsightTransport } = createClients(env);
+	const pace = createNotionPacer();
+	const hindsightDocuments = await listHindsightDocuments(
+		hindsightTransport,
+		config.hindsightBankId,
+		config.documentTags
+	);
+	const notionPages = await listNotionPages(notion, config.notionDataSourceId, pace);
+	const diff = diffInventories(notionPages, hindsightDocuments);
+	let deleted = 0;
+
+	for (const documentId of diff.delete) {
+		try {
+			await hindsight.deleteDocument(config.hindsightBankId, documentId);
+			deleted += 1;
+		} catch (error) {
+			if (!isNotFoundError(error)) throw error;
+		}
+	}
+
+	return deleted;
+}
+
+function sleep(durationMs: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, durationMs));
 }

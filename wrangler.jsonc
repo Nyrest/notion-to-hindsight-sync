@@ -1,9 +1,9 @@
 {
+	"$schema": "./node_modules/wrangler/config-schema.json",
 	"name": "notion-to-hindsight-sync",
 	"main": "src/index.ts",
 	"compatibility_date": "2026-09-21",
 	"compatibility_flags": ["nodejs_compat"],
-	"keep_vars": true,
 	"observability": {
 		"enabled": true,
 		"logs": {
@@ -15,10 +15,13 @@
 			"head_sampling_rate": 1
 		}
 	},
-	"triggers": {
-		"crons": ["0 * * * *"]
-	},
-	"secrets": {
-		"required": ["NOTION_TOKEN", "NOTION_DATA_SOURCE_ID", "HINDSIGHT_BASE_URL", "HINDSIGHT_BANK_ID"]
-	}
+	"workflows": [
+		{
+			"name": "notion-hindsight-sync",
+			"binding": "NOTION_HINDSIGHT_SYNC",
+			"class_name": "NotionHindsightSyncWorkflow",
+			"schedules": ["0 * * * *"],
+			"concurrency": { "limit": 1 }
+		}
+	]
 }
