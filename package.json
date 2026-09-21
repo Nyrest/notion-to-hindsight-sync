@@ -1,0 +1,23 @@
+{
+  "name": "notion-to-hindsight-sync",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@notionhq/client": "^5.26.0",
+    "@vectorize-io/hindsight-client": "^0.10.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.1.13",
+    "@types/node": "^26.6.2",
+    "typescript": "^5.9.2",
+    "vitest": "^4.1.0",
+    "wrangler": "^4.135.0"
+  }
+}

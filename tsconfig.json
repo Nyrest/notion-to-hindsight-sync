@@ -1,0 +1,16 @@
+{
+	"compilerOptions": {
+		"target": "es2022",
+		"module": "es2022",
+		"moduleResolution": "Bundler",
+		"lib": ["es2022"],
+		"allowImportingTsExtensions": false,
+		"isolatedModules": true,
+		"noEmit": true,
+		"strict": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true
+	},
+	"include": ["worker-configuration.d.ts", "src/**/*.ts", "test/**/*.ts"],
+	"exclude": ["node_modules"]
+}

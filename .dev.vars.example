@@ -1,0 +1,5 @@
+NOTION_TOKEN="secret_notional_integration_token"
+HINDSIGHT_API_KEY="secret_hindsight_api_key"
+NOTION_DATA_SOURCE_ID="notion-data-source-id"
+HINDSIGHT_BASE_URL="https://hindsight.example.com"
+HINDSIGHT_BANK_ID="hindsight-bank-id"

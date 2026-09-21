@@ -1,0 +1,28 @@
+{
+	"name": "notion-to-hindsight-sync",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-09-21",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true,
+		"logs": {
+			"enabled": true,
+			"head_sampling_rate": 1
+		},
+		"traces": {
+			"enabled": true,
+			"head_sampling_rate": 1
+		}
+	},
+	"triggers": {
+		"crons": ["0 * * * *"]
+	},
+	"vars": {
+		"NOTION_DATA_SOURCE_ID": "",
+		"HINDSIGHT_BASE_URL": "",
+		"HINDSIGHT_BANK_ID": ""
+	},
+	"secrets": {
+		"required": ["NOTION_TOKEN", "HINDSIGHT_API_KEY"]
+	}
+}
