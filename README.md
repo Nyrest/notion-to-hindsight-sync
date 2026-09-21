@@ -33,4 +33,6 @@ npm run deploy
 
 The default Cron trigger runs hourly at minute zero. Change `triggers.crons` in `wrangler.jsonc` if needed.
 
+For a manual online test, open `https://<your-worker-url>/sync` in a browser or call it with `curl`. The request waits for the full sync and returns its summary. This endpoint intentionally has no authentication, you'll need to set up a Cloudflare Access policy if you want to restrict access.
+
 Each run fetches the Notion and Hindsight inventories in parallel, compares document IDs and the stored Notion revision, retrieves Markdown only for new or changed pages, submits changed pages to Hindsight with async batch retain, and deletes documents that no longer exist in Notion.
