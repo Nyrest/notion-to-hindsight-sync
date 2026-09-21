@@ -1,1 +1,5 @@
 NOTION_TOKEN="secret_notional_integration_token"
+
+# Optional Hindsight Cloudflare Access service token:
+# CF_ACCESS_CLIENT_ID="..."
+# CF_ACCESS_CLIENT_SECRET="..."

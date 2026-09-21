@@ -16,6 +16,11 @@ const SOURCE_TAG = "source:notion";
 
 type HindsightTransport = ReturnType<typeof createClient>;
 type HindsightInventoryDocument = ListDocumentsResponse["items"][number];
+type OptionalEnv = Env & {
+	HINDSIGHT_API_KEY?: string;
+	CF_ACCESS_CLIENT_ID?: string;
+	CF_ACCESS_CLIENT_SECRET?: string;
+};
 
 export type NotionInventoryPage = {
 	id: string;
@@ -45,6 +50,8 @@ type SyncConfig = {
 	hindsightBaseUrl: string;
 	hindsightBankId: string;
 	hindsightApiKey?: string;
+	cfAccessClientId?: string;
+	cfAccessClientSecret?: string;
 	notionToken: string;
 	documentTags: string[];
 };
@@ -56,10 +63,13 @@ function required(value: string | undefined, name: string): string {
 }
 
 function getSyncConfig(env: Env): SyncConfig {
+	const optionalEnv = env as OptionalEnv;
 	const notionDataSourceId = required(env.NOTION_DATA_SOURCE_ID, "NOTION_DATA_SOURCE_ID");
 	const hindsightBaseUrl = required(env.HINDSIGHT_BASE_URL, "HINDSIGHT_BASE_URL").replace(/\/+$/, "");
 	const hindsightBankId = required(env.HINDSIGHT_BANK_ID, "HINDSIGHT_BANK_ID");
-	const hindsightApiKey = (env as Env & { HINDSIGHT_API_KEY?: string }).HINDSIGHT_API_KEY?.trim() || undefined;
+	const hindsightApiKey = optionalEnv.HINDSIGHT_API_KEY?.trim() || undefined;
+	const cfAccessClientId = optionalEnv.CF_ACCESS_CLIENT_ID?.trim() || undefined;
+	const cfAccessClientSecret = optionalEnv.CF_ACCESS_CLIENT_SECRET?.trim() || undefined;
 	const notionToken = required(env.NOTION_TOKEN, "NOTION_TOKEN");
 
 	const parsedBaseUrl = new URL(hindsightBaseUrl);
@@ -72,6 +82,8 @@ function getSyncConfig(env: Env): SyncConfig {
 		hindsightBaseUrl,
 		hindsightBankId,
 		hindsightApiKey,
+		cfAccessClientId,
+		cfAccessClientSecret,
 		notionToken,
 		documentTags: [SOURCE_TAG, `datasource_id:${notionDataSourceId}`],
 	};
@@ -272,17 +284,24 @@ export async function syncNotionDataSource(env: Env): Promise<SyncSummary> {
 		notionVersion: NOTION_API_VERSION,
 		retry: { maxRetries: 2 },
 	});
-	const hindsight = new HindsightClient({
-		baseUrl: config.hindsightBaseUrl,
-		...(config.hindsightApiKey ? { apiKey: config.hindsightApiKey } : {}),
-		userAgent: "notion-to-hindsight-sync/0.1.0",
-	});
 	const hindsightHeaders: Record<string, string> = {
 		"User-Agent": "notion-to-hindsight-sync/0.1.0",
 	};
+	if (config.cfAccessClientId) {
+		hindsightHeaders["CF-Access-Client-Id"] = config.cfAccessClientId;
+	}
+	if (config.cfAccessClientSecret) {
+		hindsightHeaders["CF-Access-Client-Secret"] = config.cfAccessClientSecret;
+	}
 	if (config.hindsightApiKey) {
 		hindsightHeaders.Authorization = `Bearer ${config.hindsightApiKey}`;
 	}
+	const hindsight = new HindsightClient({
+		baseUrl: config.hindsightBaseUrl,
+		headers: hindsightHeaders,
+		...(config.hindsightApiKey ? { apiKey: config.hindsightApiKey } : {}),
+		userAgent: "notion-to-hindsight-sync/0.1.0",
+	});
 	const hindsightTransport = createClient(
 		createConfig({
 			baseUrl: config.hindsightBaseUrl,
