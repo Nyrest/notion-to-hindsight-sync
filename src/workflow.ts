@@ -15,7 +15,16 @@ const WORKFLOW_STEP_TIMEOUT = "1 day";
 
 export type SyncWorkflowParams = {
 	targetKey: string;
+	force_replace?: boolean;
 };
+
+function forceReplaceFrom(params: SyncWorkflowParams): boolean {
+	if (params.force_replace === undefined) return false;
+	if (typeof params.force_replace !== "boolean") {
+		throw new Error("force_replace must be a boolean");
+	}
+	return params.force_replace;
+}
 
 export class NotionHindsightSyncWorkflow extends WorkflowEntrypoint<Env, SyncWorkflowParams> {
 	async run(
@@ -23,12 +32,13 @@ export class NotionHindsightSyncWorkflow extends WorkflowEntrypoint<Env, SyncWor
 		step: WorkflowStep
 	): Promise<SyncSummary> {
 		const target = getSyncTarget(this.env, event.payload.targetKey);
+		const forceReplace = forceReplaceFrom(event.payload);
 		let phase = "submit retain operations";
 		try {
 			const submission = await step.do(
 				phase,
 				{ timeout: WORKFLOW_STEP_TIMEOUT },
-				() => submitRetainOperations(this.env, target, event.instanceId)
+				() => submitRetainOperations(this.env, target, event.instanceId, forceReplace)
 			);
 
 			phase = "wait for retain operations";
@@ -49,6 +59,7 @@ export class NotionHindsightSyncWorkflow extends WorkflowEntrypoint<Env, SyncWor
 				JSON.stringify({
 					message: "Notion to Hindsight sync completed",
 					target: target.key,
+					forceReplace,
 					workflowInstanceId: event.instanceId,
 					...summary,
 				})
@@ -59,6 +70,7 @@ export class NotionHindsightSyncWorkflow extends WorkflowEntrypoint<Env, SyncWor
 				JSON.stringify({
 					message: "Notion to Hindsight sync failed",
 					target: target.key,
+					forceReplace,
 					workflowInstanceId: event.instanceId,
 					phase,
 					error: error instanceof Error ? error.message : String(error),

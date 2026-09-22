@@ -64,12 +64,18 @@ The Worker runs hourly at minute zero and uses `createBatch()` to create one `no
 
 Each instance submits retain batches in order, skips pages whose Markdown is empty or whitespace-only, waits until every Hindsight operation succeeds, then re-scans both inventories before deleting documents no longer present in its Notion data source. The completion log reports skipped pages as `skippedEmpty`.
 
+Every retained document appends the original Notion page-property JSON to its content, preserving date ranges, time zones, select values, relations, people, formulas, and other Notion property types for Hindsight to process. Its Hindsight `timestamp` is the Notion page's `last_edited_time`; metadata remains limited to `notion_last_edited_time` for sync bookkeeping.
+
 Trigger a manual run and inspect it with Wrangler:
 
 ```bash
 npx wrangler workflows trigger notion-hindsight-sync '{"targetKey":"personal"}'
+# Force an upsert for every existing document in this target:
+npx wrangler workflows trigger notion-hindsight-sync '{"targetKey":"personal","force_replace":true}'
 npx wrangler workflows instances list notion-hindsight-sync
 npx wrangler workflows instances describe notion-hindsight-sync <instance-id>
 ```
+
+`force_replace` is optional and defaults to `false`. When `true`, every page already present in Hindsight is retained again even when its `last_edited_time` is unchanged. New and deleted documents use the normal diff behavior.
 
 The Worker exposes only `GET /health`; it has no public sync trigger.

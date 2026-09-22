@@ -10,6 +10,7 @@ import {
 	NOTION_PAGE_SIZE,
 	operationIdFor,
 	RETAIN_BATCH_SIZE,
+	toRetainItems,
 	type HindsightOperationClient,
 	type HindsightOperationStatus,
 	type NotionInventoryPage,
@@ -20,6 +21,7 @@ const page = (id: string, lastEditedTime: string): NotionInventoryPage => ({
 	id,
 	lastEditedTime,
 	title: id,
+	properties: "{}",
 });
 
 describe("diffInventories", () => {
@@ -48,6 +50,24 @@ describe("diffInventories", () => {
 		);
 
 		expect(result.update.map((item) => item.id)).toEqual(["page"]);
+	});
+
+	it("forces updates for existing documents while preserving create and delete behavior", () => {
+		const result = diffInventories(
+			[page("same", "2026-09-21T00:00:00.000Z"), page("new", "2026-09-21T01:00:00.000Z")],
+			[
+				{
+					id: "notion_page:same",
+					document_metadata: { notion_last_edited_time: "2026-09-21T00:00:00.000Z" },
+				},
+				{ id: "stale" },
+			],
+			true
+		);
+
+		expect(result.create.map((item) => item.id)).toEqual(["new"]);
+		expect(result.update.map((item) => item.id)).toEqual(["same"]);
+		expect(result.delete).toEqual(["stale"]);
 	});
 });
 
@@ -106,6 +126,47 @@ describe("sync configuration", () => {
 		expect(NOTION_PAGE_SIZE).toBe(100);
 		expect(HINDSIGHT_INVENTORY_PAGE_SIZE).toBe(250);
 		expect(RETAIN_BATCH_SIZE).toBe(25);
+	});
+
+	it("includes Notion properties in retained content and uses the edit time as its timestamp", async () => {
+		const properties = {
+			Deadline: {
+				id: "deadline",
+				type: "date",
+				date: { start: "2026-09-22", end: "2026-09-23", time_zone: "Asia/Shanghai" },
+			},
+		};
+		const notion = {
+			dataSources: {
+				query: async () => ({
+					results: [
+						{
+							object: "page",
+							id: "page",
+							last_edited_time: "2026-09-22T00:00:00.000Z",
+							created_time: "2026-09-20T00:00:00.000Z",
+							url: "https://www.notion.so/page",
+							properties,
+						},
+					],
+					has_more: false,
+				}),
+			},
+		};
+
+		const [notionPage] = await listNotionPages(notion as never, "source", async () => {});
+		const [item] = toRetainItems(
+			[{ ...notionPage, content: "A page with a deadline" }],
+			["source:notion"],
+			"Source"
+		);
+
+		expect(item.metadata).toMatchObject({
+			notion_last_edited_time: "2026-09-22T00:00:00.000Z",
+		});
+		expect(item.metadata).not.toHaveProperty("notion_properties");
+		expect(item.timestamp).toBe("2026-09-22T00:00:00.000Z");
+		expect(item.content).toContain(JSON.stringify(properties));
 	});
 });
 

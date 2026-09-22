@@ -39,6 +39,7 @@ export type NotionInventoryPage = {
 	id: string;
 	lastEditedTime: string;
 	title: string;
+	properties: string;
 };
 
 export type SyncDiff = {
@@ -230,6 +231,10 @@ function notionPageTitle(page: PageObjectResponse): string {
 	return plainTextOfRichText(titleProperty.title) || page.id;
 }
 
+function serializedNotionProperties(page: PageObjectResponse): string {
+	return JSON.stringify(page.properties);
+}
+
 async function retrieveDataSourceName(
 	notion: NotionClient,
 	dataSourceId: string,
@@ -275,6 +280,7 @@ export async function listNotionPages(
 				id: result.id,
 				lastEditedTime: result.last_edited_time,
 				title: notionPageTitle(result),
+				properties: serializedNotionProperties(result),
 			});
 		}
 
@@ -320,7 +326,8 @@ function revisionOf(document: HindsightInventoryDocument): string | null {
 
 export function diffInventories(
 	notionPages: readonly NotionInventoryPage[],
-	hindsightDocuments: readonly HindsightInventoryDocument[]
+	hindsightDocuments: readonly HindsightInventoryDocument[],
+	forceReplace = false
 ): SyncDiff {
 	const notionById = new Map(notionPages.map((page) => [notionDocumentId(page.id), page]));
 	const hindsightById = new Map(hindsightDocuments.map((document) => [document.id, document]));
@@ -331,7 +338,7 @@ export function diffInventories(
 		const document = hindsightById.get(notionDocumentId(page.id));
 		if (!document) {
 			create.push(page);
-		} else if (revisionOf(document) !== page.lastEditedTime) {
+		} else if (forceReplace || revisionOf(document) !== page.lastEditedTime) {
 			update.push(page);
 		}
 	}
@@ -363,13 +370,14 @@ async function retrieveMarkdown(
 	return { ...page, content: response.markdown };
 }
 
-function toRetainItems(
+export function toRetainItems(
 	documents: readonly RetainDocument[],
 	documentTags: string[],
 	dataSourceName: string
 ): MemoryItemInput[] {
 	return documents.map((document) => ({
-		content: document.content,
+		content: `${document.content}\n\nNotion page properties:\n${document.properties}`,
+		timestamp: document.lastEditedTime,
 		context: `Notion Page "${document.title}" in Data Source "${dataSourceName}"`,
 		document_id: notionDocumentId(document.id),
 		tags: documentTags,
@@ -417,7 +425,8 @@ function operationIdsFrom(response: { operation_id?: string | null; operation_id
 export async function submitRetainOperations(
 	env: Env,
 	target: SyncTarget,
-	workflowInstanceId: string
+	workflowInstanceId: string,
+	forceReplace = false
 ): Promise<RetainSubmission> {
 	const { config, notion, hindsight, hindsightTransport } = createClients(env, target);
 	const pace = createNotionPacer();
@@ -426,7 +435,7 @@ export async function submitRetainOperations(
 		listNotionPages(notion, config.notionDataSourceId, pace),
 	]);
 	const dataSourceName = await retrieveDataSourceName(notion, config.notionDataSourceId, pace);
-	const diff = diffInventories(notionPages, hindsightDocuments);
+	const diff = diffInventories(notionPages, hindsightDocuments, forceReplace);
 	const changedPages = [...diff.create, ...diff.update].sort((left, right) =>
 		left.id.localeCompare(right.id)
 	);
