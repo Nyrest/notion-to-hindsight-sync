@@ -15,12 +15,14 @@
 			"head_sampling_rate": 1
 		}
 	},
+	"triggers": {
+		"crons": ["0 * * * *"]
+	},
 	"workflows": [
 		{
 			"name": "notion-hindsight-sync",
 			"binding": "NOTION_HINDSIGHT_SYNC",
 			"class_name": "NotionHindsightSyncWorkflow",
-			"schedules": ["0 * * * *"],
 			"concurrency": { "limit": 1 }
 		}
 	]

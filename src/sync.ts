@@ -11,6 +11,7 @@ import {
 	type ListDocumentsResponse,
 	type MemoryItemInput,
 } from "@vectorize-io/hindsight-client";
+import type { SyncTarget } from "./config";
 
 const NOTION_API_VERSION = "2026-03-11";
 export const NOTION_PAGE_SIZE = 100;
@@ -91,11 +92,11 @@ function required(value: string | undefined, name: string): string {
 	return normalized;
 }
 
-function getSyncConfig(env: Env): SyncConfig {
+function getSyncConfig(env: Env, target: SyncTarget): SyncConfig {
 	const optionalEnv = env as OptionalEnv;
-	const notionDataSourceId = required(env.NOTION_DATA_SOURCE_ID, "NOTION_DATA_SOURCE_ID");
+	const notionDataSourceId = required(target.notionDataSourceId, "notionDataSourceId");
 	const hindsightBaseUrl = required(env.HINDSIGHT_BASE_URL, "HINDSIGHT_BASE_URL").replace(/\/+$/, "");
-	const hindsightBankId = required(env.HINDSIGHT_BANK_ID, "HINDSIGHT_BANK_ID");
+	const hindsightBankId = required(target.hindsightBankId, "hindsightBankId");
 	const hindsightApiKey = optionalEnv.HINDSIGHT_API_KEY?.trim() || undefined;
 	const cfAccessClientId = optionalEnv.CF_ACCESS_CLIENT_ID?.trim() || undefined;
 	const cfAccessClientSecret = optionalEnv.CF_ACCESS_CLIENT_SECRET?.trim() || undefined;
@@ -158,13 +159,13 @@ async function pacedNotionRequest<T>(
 	return request();
 }
 
-function createClients(env: Env): {
+function createClients(env: Env, target: SyncTarget): {
 	config: SyncConfig;
 	notion: NotionClient;
 	hindsight: HindsightClient;
 	hindsightTransport: HindsightTransport;
 } {
-	const config = getSyncConfig(env);
+	const config = getSyncConfig(env, target);
 	const notion = new NotionClient({
 		auth: config.notionToken,
 		notionVersion: NOTION_API_VERSION,
@@ -410,16 +411,15 @@ function operationIdsFrom(response: { operation_id?: string | null; operation_id
 
 export async function submitRetainOperations(
 	env: Env,
+	target: SyncTarget,
 	workflowInstanceId: string
 ): Promise<RetainSubmission> {
-	const { config, notion, hindsight, hindsightTransport } = createClients(env);
+	const { config, notion, hindsight, hindsightTransport } = createClients(env, target);
 	const pace = createNotionPacer();
-	const hindsightDocuments = await listHindsightDocuments(
-		hindsightTransport,
-		config.hindsightBankId,
-		config.documentTags
-	);
-	const notionPages = await listNotionPages(notion, config.notionDataSourceId, pace);
+	const [hindsightDocuments, notionPages] = await Promise.all([
+		listHindsightDocuments(hindsightTransport, config.hindsightBankId, config.documentTags),
+		listNotionPages(notion, config.notionDataSourceId, pace),
+	]);
 	const dataSourceName = await retrieveDataSourceName(notion, config.notionDataSourceId, pace);
 	const diff = diffInventories(notionPages, hindsightDocuments);
 	const changedPages = [...diff.create, ...diff.update].sort((left, right) =>
@@ -513,8 +513,12 @@ export async function waitForRetainOperations(
 	}
 }
 
-export async function waitForSubmittedRetains(env: Env, operationIds: readonly string[]): Promise<void> {
-	const { config, hindsightTransport } = createClients(env);
+export async function waitForSubmittedRetains(
+	env: Env,
+	target: SyncTarget,
+	operationIds: readonly string[]
+): Promise<void> {
+	const { config, hindsightTransport } = createClients(env, target);
 	await waitForRetainOperations(
 		createOperationClient(hindsightTransport, config.hindsightBankId),
 		operationIds
@@ -525,15 +529,13 @@ function isNotFoundError(error: unknown): boolean {
 	return error instanceof Error && (/\b404\b/.test(error.message) || /not[ _-]?found/i.test(error.message));
 }
 
-export async function deleteMissingDocuments(env: Env): Promise<number> {
-	const { config, notion, hindsight, hindsightTransport } = createClients(env);
+export async function deleteMissingDocuments(env: Env, target: SyncTarget): Promise<number> {
+	const { config, notion, hindsight, hindsightTransport } = createClients(env, target);
 	const pace = createNotionPacer();
-	const hindsightDocuments = await listHindsightDocuments(
-		hindsightTransport,
-		config.hindsightBankId,
-		config.documentTags
-	);
-	const notionPages = await listNotionPages(notion, config.notionDataSourceId, pace);
+	const [hindsightDocuments, notionPages] = await Promise.all([
+		listHindsightDocuments(hindsightTransport, config.hindsightBankId, config.documentTags),
+		listNotionPages(notion, config.notionDataSourceId, pace),
+	]);
 	const diff = diffInventories(notionPages, hindsightDocuments);
 	let deleted = 0;
 

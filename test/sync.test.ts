@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { getSyncTarget, getSyncTargets } from "../src/config";
 import worker from "../src/index";
 import {
 	diffInventories,
@@ -50,6 +51,43 @@ describe("diffInventories", () => {
 });
 
 describe("sync configuration", () => {
+	it("parses independent sync targets and finds a target by key", () => {
+		const env = {
+			SYNC_TARGETS: JSON.stringify([
+				{
+					key: "personal",
+					notionDataSourceId: "notion-personal",
+					hindsightBankId: "hindsight-personal",
+				},
+				{
+					key: "research",
+					notionDataSourceId: "notion-research",
+					hindsightBankId: "hindsight-research",
+				},
+			]),
+		} as unknown as Env;
+
+		expect(getSyncTargets(env)).toHaveLength(2);
+		expect(getSyncTarget(env, "research")).toMatchObject({
+			notionDataSourceId: "notion-research",
+			hindsightBankId: "hindsight-research",
+		});
+	});
+
+	it("rejects malformed and duplicate sync targets", () => {
+		expect(() => getSyncTargets({ SYNC_TARGETS: "invalid" } as unknown as Env)).toThrow(
+			"must contain valid JSON"
+		);
+		expect(() =>
+			getSyncTargets({
+				SYNC_TARGETS: JSON.stringify([
+					{ key: "same", notionDataSourceId: "notion-a", hindsightBankId: "bank-a" },
+					{ key: "same", notionDataSourceId: "notion-b", hindsightBankId: "bank-b" },
+				]),
+			} as unknown as Env)
+		).toThrow("duplicate key");
+	});
+
 	it("uses separate page sizes for Notion and Hindsight", async () => {
 		let query: Record<string, unknown> | undefined;
 		const notion = {
@@ -134,5 +172,25 @@ describe("HTTP surface", () => {
 		expect(health.status).toBe(200);
 		expect(await health.json()).toEqual({ ok: true, service: "notion-to-hindsight-sync" });
 		expect(sync.status).toBe(404);
+	});
+});
+
+describe("scheduled sync dispatch", () => {
+	it("creates one workflow instance per sync target", async () => {
+		const createBatch = vi.fn(async () => []);
+		const env = {
+			SYNC_TARGETS: JSON.stringify([
+				{ key: "personal", notionDataSourceId: "notion-a", hindsightBankId: "bank-a" },
+				{ key: "research", notionDataSourceId: "notion-b", hindsightBankId: "bank-b" },
+			]),
+			NOTION_HINDSIGHT_SYNC: { createBatch },
+		} as unknown as Env;
+
+		await worker.scheduled({ scheduledTime: 1_790_028_000_000 } as ScheduledController, env);
+
+		expect(createBatch).toHaveBeenCalledWith([
+			{ id: "personal-1790028000000", params: { targetKey: "personal" } },
+			{ id: "research-1790028000000", params: { targetKey: "research" } },
+		]);
 	});
 });

@@ -1,8 +1,7 @@
 # Required Notion integration secret:
 NOTION_TOKEN="secret_notion_integration_token"
-NOTION_DATA_SOURCE_ID="notion_data_source_id"
 HINDSIGHT_BASE_URL="https://hindsight.example.com"
-HINDSIGHT_BANK_ID="hindsight_bank_id"
+SYNC_TARGETS='[{"key":"personal","notionDataSourceId":"notion_data_source_id","hindsightBankId":"hindsight_bank_id"}]'
 
 # Optional when Hindsight requires bearer authentication:
 # HINDSIGHT_API_KEY="..."
