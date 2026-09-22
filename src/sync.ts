@@ -53,6 +53,7 @@ export type RetainSubmission = {
 	updated: number;
 	unchanged: number;
 	retained: number;
+	skippedEmpty: number;
 	retainOperations: string[];
 };
 
@@ -64,6 +65,10 @@ export type SyncSummary = RetainSubmission & {
 type RetainDocument = NotionInventoryPage & {
 	content: string;
 };
+
+export function hasSyncableContent(content: string): boolean {
+	return content.trim().length > 0;
+}
 
 type SyncConfig = {
 	notionDataSourceId: string;
@@ -426,24 +431,32 @@ export async function submitRetainOperations(
 		left.id.localeCompare(right.id)
 	);
 	const retainOperations: string[] = [];
+	let retained = 0;
+	let skippedEmpty = 0;
 
 	for (const batch of chunk(changedPages, RETAIN_BATCH_SIZE)) {
 		const documents: RetainDocument[] = [];
 		for (const page of batch) documents.push(await retrieveMarkdown(notion, page, pace));
+		const syncableDocuments = documents.filter((document) => hasSyncableContent(document.content));
+		skippedEmpty += documents.length - syncableDocuments.length;
+		if (syncableDocuments.length === 0) continue;
+
 		const response = await hindsight.retainBatch(
 			config.hindsightBankId,
-			toRetainItems(documents, config.documentTags, dataSourceName),
-			{ async: true, operationId: await operationIdFor(workflowInstanceId, batch) }
+			toRetainItems(syncableDocuments, config.documentTags, dataSourceName),
+			{ async: true, operationId: await operationIdFor(workflowInstanceId, syncableDocuments) }
 		);
 		if (!response.success) throw new Error("Hindsight retainBatch was not accepted");
 		retainOperations.push(...operationIdsFrom(response));
+		retained += syncableDocuments.length;
 	}
 
 	return {
 		created: diff.create.length,
 		updated: diff.update.length,
 		unchanged: diff.unchanged,
-		retained: changedPages.length,
+		retained,
+		skippedEmpty,
 		retainOperations: [...new Set(retainOperations)],
 	};
 }

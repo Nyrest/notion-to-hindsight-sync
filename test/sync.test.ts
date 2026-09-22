@@ -3,6 +3,7 @@ import { getSyncTarget, getSyncTargets } from "../src/config";
 import worker from "../src/index";
 import {
 	diffInventories,
+	hasSyncableContent,
 	HINDSIGHT_INVENTORY_PAGE_SIZE,
 	HINDSIGHT_OPERATION_POLL_MS,
 	listNotionPages,
@@ -105,6 +106,14 @@ describe("sync configuration", () => {
 		expect(NOTION_PAGE_SIZE).toBe(100);
 		expect(HINDSIGHT_INVENTORY_PAGE_SIZE).toBe(250);
 		expect(RETAIN_BATCH_SIZE).toBe(25);
+	});
+});
+
+describe("retain content validation", () => {
+	it("skips empty and whitespace-only Notion markdown", () => {
+		expect(hasSyncableContent("")).toBe(false);
+		expect(hasSyncableContent(" \n\t ")).toBe(false);
+		expect(hasSyncableContent("# A page")).toBe(true);
 	});
 });
 
