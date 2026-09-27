@@ -39,12 +39,15 @@ npx wrangler secret put CF_ACCESS_CLIENT_SECRET
 	{
 		"key": "research",
 		"notionDataSourceId": "another_notion_data_source_id",
-		"hindsightBankId": "another_hindsight_bank_id"
+		"hindsightBankId": "another_hindsight_bank_id",
+		"retainStrategy": "documents"
 	}
 ]
 ```
 
 `key` must be unique and contain only letters, numbers, underscores, or hyphens. The Worker passes only this key to each Workflow; the data source and bank IDs remain in the `SYNC_TARGETS` secret. One Cron run supports up to 100 targets.
+
+`retainStrategy` is optional for each target. Set it to a strategy name configured for that Hindsight bank to override the bank's default retain strategy for this target. If omitted, Hindsight applies the bank's default strategy.
 
 To migrate an existing deployment, move the former `NOTION_DATA_SOURCE_ID` and `HINDSIGHT_BANK_ID` values into one `SYNC_TARGETS` item before deploying. Those two single-target secrets are no longer read; after a successful deployment they may be removed from Cloudflare.
 

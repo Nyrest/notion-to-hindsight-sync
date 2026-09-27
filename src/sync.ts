@@ -373,7 +373,8 @@ async function retrieveMarkdown(
 export function toRetainItems(
 	documents: readonly RetainDocument[],
 	documentTags: string[],
-	dataSourceName: string
+	dataSourceName: string,
+	retainStrategy?: string
 ): MemoryItemInput[] {
 	return documents.map((document) => ({
 		content: `${document.content}\n\nNotion page properties:\n${document.properties}`,
@@ -383,6 +384,7 @@ export function toRetainItems(
 		tags: documentTags,
 		metadata: { [RETAIN_METADATA_REVISION]: document.lastEditedTime },
 		update_mode: "replace",
+		...(retainStrategy ? { strategy: retainStrategy } : {}),
 	}));
 }
 
@@ -452,7 +454,7 @@ export async function submitRetainOperations(
 
 		const response = await hindsight.retainBatch(
 			config.hindsightBankId,
-			toRetainItems(syncableDocuments, config.documentTags, dataSourceName),
+			toRetainItems(syncableDocuments, config.documentTags, dataSourceName, target.retainStrategy),
 			{ async: true, operationId: await operationIdFor(workflowInstanceId, syncableDocuments) }
 		);
 		if (!response.success) throw new Error("Hindsight retainBatch was not accepted");

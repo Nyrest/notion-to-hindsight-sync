@@ -2,6 +2,7 @@ export type SyncTarget = {
 	key: string;
 	notionDataSourceId: string;
 	hindsightBankId: string;
+	retainStrategy?: string;
 };
 
 type TargetEnv = Env & {
@@ -22,6 +23,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function requiredTargetString(value: unknown, property: string, index: number): string {
 	if (typeof value !== "string" || !value.trim()) {
 		throw new Error(`SYNC_TARGETS item ${index} requires a non-empty ${property}`);
+	}
+	return value.trim();
+}
+
+function optionalTargetString(value: unknown, property: string, index: number): string | undefined {
+	if (value === undefined) return undefined;
+	if (typeof value !== "string" || !value.trim()) {
+		throw new Error(`SYNC_TARGETS item ${index} requires a non-empty ${property} when provided`);
 	}
 	return value.trim();
 }
@@ -61,6 +70,7 @@ export function getSyncTargets(env: Env): SyncTarget[] {
 			key,
 			notionDataSourceId: requiredTargetString(item.notionDataSourceId, "notionDataSourceId", index),
 			hindsightBankId: requiredTargetString(item.hindsightBankId, "hindsightBankId", index),
+			retainStrategy: optionalTargetString(item.retainStrategy, "retainStrategy", index),
 		};
 	});
 }
