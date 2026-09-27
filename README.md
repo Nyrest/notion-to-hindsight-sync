@@ -65,7 +65,7 @@ npm run deploy
 
 The Worker runs hourly at minute zero and uses `createBatch()` to create one `notion-hindsight-sync` Workflow instance for every target. Instances have IDs such as `personal-<scheduledTime>`, so logs, retries, and results are separate by target. The Workflow concurrency limit remains `1` to preserve the existing per-token Notion request pacing; additional instances queue until the prior instance completes.
 
-Each instance submits retain batches in order, skips pages whose Markdown is empty or whitespace-only, waits until every Hindsight operation succeeds, then re-scans both inventories before deleting documents no longer present in its Notion data source. The completion log reports skipped pages as `skippedEmpty`.
+Each instance submits retain batches in order, skips a page only when its final content is empty or whitespace-only after the Notion page properties have been appended, waits until every Hindsight operation succeeds, then re-scans both inventories before deleting documents no longer present in its Notion data source. The completion log reports skipped pages as `skippedEmpty`.
 
 Every retained document appends the original Notion page-property JSON to its content, preserving date ranges, time zones, select values, relations, people, formulas, and other Notion property types for Hindsight to process. Its Hindsight `timestamp` is the Notion page's `last_edited_time`; metadata remains limited to `notion_last_edited_time` for sync bookkeeping.
 

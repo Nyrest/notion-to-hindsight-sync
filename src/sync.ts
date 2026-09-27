@@ -377,7 +377,7 @@ export function toRetainItems(
 	retainStrategy?: string
 ): MemoryItemInput[] {
 	return documents.map((document) => ({
-		content: `${document.content}\n\nNotion page properties:\n${document.properties}`,
+		content: retainContent(document),
 		timestamp: document.lastEditedTime,
 		context: `Notion Page "${document.title}" in Data Source "${dataSourceName}"`,
 		document_id: notionDocumentId(document.id),
@@ -386,6 +386,10 @@ export function toRetainItems(
 		update_mode: "replace",
 		...(retainStrategy ? { strategy: retainStrategy } : {}),
 	}));
+}
+
+function retainContent(document: RetainDocument): string {
+	return `${document.content}\n\nNotion page properties:\n${document.properties}`;
 }
 
 function chunk<T>(items: readonly T[], size: number): T[][] {
@@ -448,7 +452,9 @@ export async function submitRetainOperations(
 	for (const batch of chunk(changedPages, RETAIN_BATCH_SIZE)) {
 		const documents: RetainDocument[] = [];
 		for (const page of batch) documents.push(await retrieveMarkdown(notion, page, pace));
-		const syncableDocuments = documents.filter((document) => hasSyncableContent(document.content));
+		const syncableDocuments = documents.filter((document) =>
+			hasSyncableContent(retainContent(document))
+		);
 		skippedEmpty += documents.length - syncableDocuments.length;
 		if (syncableDocuments.length === 0) continue;
 
