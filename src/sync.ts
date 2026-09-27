@@ -389,7 +389,7 @@ export function toRetainItems(
 }
 
 function retainContent(document: RetainDocument): string {
-	return `${document.content}\n\nNotion page properties:\n${document.properties}`;
+	return `${document.content}\n\nNotion page properties:\n${document.properties}`.trim();
 }
 
 function chunk<T>(items: readonly T[], size: number): T[][] {
