@@ -6,7 +6,8 @@
   </a>
 </div>
 
-Sync Notion page Markdown and properties into Hindsight every hour. Built on Cloudflare Workers and Workflows.
+Sync Notion page Markdown and properties into Hindsight every hour. Built on Cloudflare Workers and Workflows.  
+If you want to self-host this with docker, consider using https://github.com/Nyrest/hindsight-ingestion
 
 [Features](#features) · [Quick start](#quick-start) · [Configuration](#configuration) · [Deployment](#deployment) · [Usage](#usage) · [Development](#development)
 
